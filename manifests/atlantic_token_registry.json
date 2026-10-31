@@ -1,0 +1,27 @@
+{
+  "title": "Atlantic Testnet Token Registry Inspection",
+  "require_success": false,
+  "actions": [
+    {
+      "target": "0x838800b758277CC111B2d48Ab01e5E164f8E9471",
+      "call_data": "0x95d89b41",
+      "description": "WPHRS.symbol()",
+      "action_type": "read",
+      "expected_result_type": "string"
+    },
+    {
+      "target": "0xcfC8330f4BCAB529c625D12781b1C19466A9Fc8B",
+      "call_data": "0x95d89b41",
+      "description": "USDC.symbol()",
+      "action_type": "read",
+      "expected_result_type": "string"
+    },
+    {
+      "target": "0xcfC8330f4BCAB529c625D12781b1C19466A9Fc8B",
+      "call_data": "0x313ce567",
+      "description": "USDC.decimals()",
+      "action_type": "read",
+      "expected_result_type": "uint8"
+    }
+  ]
+}

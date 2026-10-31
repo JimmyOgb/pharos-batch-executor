@@ -1,0 +1,38 @@
+# Python Bytecode and Caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Environment Variables and Credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.keystore
+
+# Temporary Files and OS Artifacts
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
+.system_generated/
+
+# Large Raw Video Captures (Exclude raw webm captures; master mp4 is tracked)
+raw_video/
+
+# Testing relics
+artifacts/

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pharos Batch Executor — MultiCall3 Engine</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="brand">
+          <span class="brand-badge">Pharos Season of AI</span>
+          <h1>Batch Executor</h1>
+        </div>
+        <p class="subtitle">MultiCall3 Batch Execution Engine on Pharos Atlantic Testnet (Chain ID 688689)</p>
+      </div>
+      <div class="header-right">
+        <div class="network-badge live" id="network-pill">
+          <span class="dot"></span>
+          <span id="network-status-text">Connecting to Atlantic Node...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Node & MultiCall3 Status Bar -->
+    <section class="status-bar" id="status-bar">
+      <div class="status-col">
+        <span class="label">Target Network</span>
+        <span class="value" id="stat-network">Pharos Atlantic Testnet</span>
+      </div>
+      <div class="status-col">
+        <span class="label">Chain ID</span>
+        <span class="value" id="stat-chain">688689 (0xa8231)</span>
+      </div>
+      <div class="status-col">
+        <span class="label">Live Block Height</span>
+        <span class="value mono" id="stat-block">Loading...</span>
+      </div>
+      <div class="status-col">
+        <span class="label">MultiCall3 Address</span>
+        <span class="value mono" id="stat-multicall" title="0xcA11bde05977b3631167028862bE2a173976CA11">0xcA11...CA11</span>
+      </div>
+      <div class="status-col">
+        <span class="label">Contract Bytecode</span>
+        <span class="value badge-success" id="stat-bytecode">Verified (7,618 bytes)</span>
+      </div>
+    </section>
+
+    <!-- Main Workspace Grid -->
+    <main class="grid-layout">
+      <!-- Left Column: Manifest Controls & Scenarios -->
+      <section class="card manifest-panel">
+        <div class="card-header">
+          <h2>1. Batch Manifest Builder</h2>
+          <span class="badge" id="action-count-badge">3 Actions Configured</span>
+        </div>
+
+        <div class="scenario-selector">
+          <label class="section-label">Select Verified Atlantic Scenario:</label>
+          <div class="scenario-buttons">
+            <button class="btn btn-secondary active" id="btn-scenario-account" type="button">
+              Account & Block Inspection (All Succeeded)
+            </button>
+            <button class="btn btn-secondary" id="btn-scenario-partial" type="button">
+              Partial Failure (Calls 1 & 3 Pass, Call 2 Reverts)
+            </button>
+            <button class="btn btn-secondary" id="btn-scenario-token" type="button">
+              Token Registry (WPHRS & USDC Metadata)
+            </button>
+          </div>
+        </div>
+
+        <!-- Action Items List -->
+        <div class="actions-container">
+          <div class="section-subhead">
+            <span class="section-label">Configured Actions (Minimum 3 Required):</span>
+            <button class="btn-text" id="btn-add-action" type="button">+ Add Action</button>
+          </div>
+          <div id="actions-list" class="actions-list">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- Action Controls -->
+        <div class="action-footer">
+          <div class="toggle-group">
+            <label class="toggle-switch">
+              <input type="checkbox" id="require-success-toggle">
+              <span class="slider"></span>
+            </label>
+            <span class="toggle-label">Require All Actions Succeeded (Atomic)</span>
+          </div>
+          <button class="btn btn-primary btn-large" id="btn-execute-batch" type="button">
+            Execute Single MultiCall3 Batch
+          </button>
+        </div>
+      </section>
+
+      <!-- Right Column: Results & Honest Gas Comparison -->
+      <section class="card results-panel">
+        <div class="card-header">
+          <h2>2. Real-Time On-Chain Results</h2>
+          <span class="badge" id="results-status-badge">Awaiting Execution</span>
+        </div>
+
+        <!-- Execution Summary Stats -->
+        <div class="summary-grid" id="summary-grid">
+          <div class="stat-card">
+            <span class="stat-num" id="res-total">0</span>
+            <span class="stat-label">Total Actions</span>
+          </div>
+          <div class="stat-card success">
+            <span class="stat-num" id="res-success">0</span>
+            <span class="stat-label">Succeeded</span>
+          </div>
+          <div class="stat-card danger">
+            <span class="stat-num" id="res-failed">0</span>
+            <span class="stat-label">Reverted</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-num mono" id="res-block-num">—</span>
+            <span class="stat-label">Execution Block</span>
+          </div>
+        </div>
+
+        <!-- Detailed Results List -->
+        <div class="results-detail-container">
+          <label class="section-label">Decoded Per-Action Outcome:</label>
+          <div id="results-list" class="results-list">
+            <div class="empty-state">
+              Click <strong>"Execute Single MultiCall3 Batch"</strong> to dispatch a live <code>eth_call</code> to Atlantic Testnet.
+            </div>
+          </div>
+        </div>
+
+        <!-- Honest Gas Comparison -->
+        <div class="gas-comparison-card" id="gas-card">
+          <div class="card-header-sm">
+            <h3>Honest Gas & Step Optimization Metrics</h3>
+            <span class="badge-warning">Theoretical Base Gas</span>
+          </div>
+          <div class="gas-grid">
+            <div class="gas-stat">
+              <span class="gas-title">Standalone Transactions</span>
+              <span class="gas-value" id="gas-standalone-count">3 transactions</span>
+              <span class="gas-desc">3 individual wallet signatures</span>
+            </div>
+            <div class="gas-stat">
+              <span class="gas-title">Batched Transaction</span>
+              <span class="gas-value highlight" id="gas-batched-count">1 transaction</span>
+              <span class="gas-desc">Single MultiCall3 dispatch</span>
+            </div>
+            <div class="gas-stat">
+              <span class="gas-title">Steps Eliminated</span>
+              <span class="gas-value" id="gas-steps-eliminated">2 steps saved</span>
+              <span class="gas-desc">Reduced confirmation friction</span>
+            </div>
+            <div class="gas-stat">
+              <span class="gas-title">Intrinsic Gas Avoided</span>
+              <span class="gas-value highlight" id="gas-overhead-saved">42,000 gas units</span>
+              <span class="gas-desc">Based on 21,000 base overhead</span>
+            </div>
+          </div>
+          <p class="gas-notice" id="gas-notice">
+            <strong>Honest Disclosure:</strong> Intrinsic gas savings are based strictly on avoiding repeated 21,000 base transaction overheads. Actual net gas savings depend on MultiCall contract execution loop overhead and must be verified from live on-chain receipts.
+          </p>
+        </div>
+
+        <!-- Raw Calldata & Response Inspector (Collapsible) -->
+        <details class="inspector-details">
+          <summary>Inspect Raw Calldata & Node Response</summary>
+          <div class="inspector-body">
+            <div class="inspector-field">
+              <span class="inspector-label">Calldata Sent to MultiCall3:</span>
+              <pre class="code-block" id="inspect-calldata">—</pre>
+            </div>
+            <div class="inspector-field">
+              <span class="inspector-label">Raw Hex Response from Node:</span>
+              <pre class="code-block" id="inspect-response">—</pre>
+            </div>
+          </div>
+        </details>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <span>Pharos Season of AI · Agent Arena Task 10</span>
+      <span>Target Repo: <code>JimmyOgb/pharos-batch-executor</code></span>
+      <span>Direct RPC: <code>https://atlantic.dplabs-internal.com</code></span>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
