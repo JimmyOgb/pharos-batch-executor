@@ -1,9 +1,12 @@
 // Pharos Batch Executor Web Client
-// Interacts with backend API and Pharos Atlantic Testnet
+// Interacts with Pharos Atlantic Testnet (Chain ID 688689)
+// Dual-mode: Uses local backend API if available, falls back to direct browser-originated JSON-RPC
 
+const ATLANTIC_RPC_URL = "https://atlantic.dplabs-internal.com";
+const EXPECTED_CHAIN_ID = 688689;
 const MULTICALL3_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11";
-const USDC_ADDRESS = "0xcfC8330f4BCAB529c625D12781b1C19466A9Fc8B";
-const WPHRS_ADDRESS = "0x838800b758277CC111B2d48Ab01e5E164f8E9471";
+const USDC_ADDRESS = "0xad58e5d48259d57a220c8db4630aeb29cb01584c";
+const WPHRS_ADDRESS = "0x16b60700abb790EF7d4a413A28E51048b61e2A66";
 const REWARD_WALLET = "0xcc8475078f3C13975AcaA72F2B824097551Ca768";
 
 // Pre-configured Verified Scenarios
@@ -21,7 +24,7 @@ const SCENARIOS = {
       },
       {
         target: MULTICALL3_ADDRESS,
-        call_data: "0x0f28c97d",
+        call_data: "0x0e5d8001",
         description: "MultiCall3.getCurrentBlockTimestamp()",
         action_type: "read",
         expected_result_type: "uint256"
@@ -55,7 +58,7 @@ const SCENARIOS = {
       },
       {
         target: MULTICALL3_ADDRESS,
-        call_data: "0x0f28c97d",
+        call_data: "0x0e5d8001",
         description: "MultiCall3.getCurrentBlockTimestamp() [Valid]",
         action_type: "read",
         expected_result_type: "uint256"
@@ -117,14 +120,135 @@ const gasOverheadSaved = document.getElementById("gas-overhead-saved");
 const inspectCalldata = document.getElementById("inspect-calldata");
 const inspectResponse = document.getElementById("inspect-response");
 
+// Direct Browser JSON-RPC Helper
+async function browserRpcCall(method, params = []) {
+  const resp = await fetch(ATLANTIC_RPC_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params })
+  });
+  if (!resp.ok) throw new Error(`Atlantic RPC transport HTTP ${resp.status}`);
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error.message || "Atlantic RPC returned an error");
+  return data.result;
+}
+
+// ABI Encoder for tryAggregate(bool, (address,bytes)[])
+function encodeTryAggregate(requireSuccess, actions) {
+  let res = "0xbce38bd7";
+  res += requireSuccess
+    ? "0000000000000000000000000000000000000000000000000000000000000001"
+    : "0000000000000000000000000000000000000000000000000000000000000000";
+  res += "0000000000000000000000000000000000000000000000000000000000000040";
+  const n = actions.length;
+  res += n.toString(16).padStart(64, "0");
+  const tupleHeads = [];
+  const tupleTails = [];
+  let currentTailOffset = n * 32;
+
+  for (const act of actions) {
+    tupleHeads.push(currentTailOffset.toString(16).padStart(64, "0"));
+    const tgt = act.target.toLowerCase().replace("0x", "").padStart(64, "0");
+    const cdHex = act.call_data.toLowerCase().replace("0x", "");
+    const cdBytesLen = Math.floor(cdHex.length / 2);
+    const paddedCd = cdHex.padEnd(Math.ceil(cdHex.length / 64) * 64, "0");
+    const tData = tgt + "0000000000000000000000000000000000000000000000000000000000000040" + cdBytesLen.toString(16).padStart(64, "0") + paddedCd;
+    tupleTails.push(tData);
+    currentTailOffset += Math.floor(tData.length / 2);
+  }
+
+  res += tupleHeads.join("") + tupleTails.join("");
+  return res;
+}
+
+// ABI Decoder for tryAggregate result: (bool, bytes)[]
+function decodeTryAggregate(rawHex) {
+  const data = rawHex.replace("0x", "");
+  const arrOffset = parseInt(data.slice(0, 64), 16) * 2;
+  const count = parseInt(data.slice(arrOffset, arrOffset + 64), 16);
+  const payloadStart = arrOffset + 64;
+  const results = [];
+
+  for (let i = 0; i < count; i++) {
+    const elemRelOffset = parseInt(data.slice(payloadStart + i * 64, payloadStart + (i + 1) * 64), 16) * 2;
+    const elemStart = payloadStart + elemRelOffset;
+    const success = parseInt(data.slice(elemStart, elemStart + 64), 16) !== 0;
+    const bytesRelOffset = parseInt(data.slice(elemStart + 64, elemStart + 128), 16) * 2;
+    const bytesStart = elemStart + bytesRelOffset;
+    const bytesLen = parseInt(data.slice(bytesStart, bytesStart + 64), 16);
+    const rawBytesHex = data.slice(bytesStart + 64, bytesStart + 64 + bytesLen * 2);
+
+    let revertReason = null;
+    let decodedValue = null;
+
+    if (!success) {
+      if (rawBytesHex.startsWith("08c379a0")) {
+        const sLen = parseInt(rawBytesHex.slice(8 + 64, 8 + 128), 16);
+        const sHex = rawBytesHex.slice(8 + 128, 8 + 128 + sLen * 2);
+        try {
+          revertReason = decodeHexUTF8(sHex);
+        } catch {
+          revertReason = "Reverted with Error(string)";
+        }
+      } else if (rawBytesHex.startsWith("4e487b71")) {
+        const panicCode = parseInt(rawBytesHex.slice(8, 72), 16);
+        revertReason = `Panic(0x${panicCode.toString(16)})`;
+      } else {
+        revertReason = rawBytesHex.length > 0 ? `Custom error: 0x${rawBytesHex.slice(0, 8)}` : "Transaction reverted silently";
+      }
+    } else {
+      if (rawBytesHex.length === 64) {
+        decodedValue = BigInt("0x" + rawBytesHex).toString();
+      }
+    }
+
+    results.append ? null : results.push({
+      success,
+      return_data: "0x" + rawBytesHex,
+      revert_reason: revertReason,
+      decoded_value: decodedValue
+    });
+  }
+
+  return results;
+}
+
+function decodeHexUTF8(hex) {
+  let str = "";
+  for (let i = 0; i < hex.length; i += 2) {
+    str += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+  }
+  return str;
+}
+
 // Fetch Live Network Status on Load
 async function fetchStatus() {
   try {
-    const res = await fetch("/api/status");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    statBlock.textContent = `#${data.network.block_number.toLocaleString()}`;
-    networkStatusText.textContent = "Atlantic Testnet (Connected)";
+    // 1. Try local backend
+    try {
+      const res = await fetch("/api/status");
+      if (res.ok) {
+        const data = await res.json();
+        statBlock.textContent = `#${data.network.block_number.toLocaleString()}`;
+        networkStatusText.textContent = "Atlantic Testnet (Connected)";
+        networkPill.className = "network-badge live";
+        return;
+      }
+    } catch {
+      // fallback to browser RPC
+    }
+
+    // 2. Browser Direct RPC
+    const chainHex = await browserRpcCall("eth_chainId");
+    const chainId = parseInt(chainHex, 16);
+    if (chainId !== EXPECTED_CHAIN_ID) {
+      throw new Error(`Unexpected Chain ID: ${chainId} (expected ${EXPECTED_CHAIN_ID})`);
+    }
+
+    const blockHex = await browserRpcCall("eth_blockNumber");
+    const blockNum = parseInt(blockHex, 16);
+    statBlock.textContent = `#${blockNum.toLocaleString()}`;
+    networkStatusText.textContent = "Atlantic Testnet (Direct RPC)";
     networkPill.className = "network-badge live";
   } catch (err) {
     networkStatusText.textContent = "Atlantic Node Offline / Error";
@@ -182,7 +306,7 @@ function selectScenario(scenarioKey) {
   renderActions();
 }
 
-// Execute Batch through Backend API
+// Execute Batch through Backend API or Direct Browser RPC
 async function executeBatch() {
   btnExecute.disabled = true;
   btnExecute.textContent = "Dispatching MultiCall3 eth_call...";
@@ -191,18 +315,71 @@ async function executeBatch() {
 
   try {
     currentManifest.require_success = requireSuccessToggle.checked;
-    const res = await fetch("/api/execute", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(currentManifest)
-    });
 
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.detail || `Server error: HTTP ${res.status}`);
+    let data = null;
+
+    // 1. Try local backend first
+    try {
+      const res = await fetch("/api/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(currentManifest)
+      });
+      if (res.ok) {
+        data = await res.json();
+      }
+    } catch {
+      // local backend not reachable, proceed to browser RPC
     }
 
-    const data = await res.json();
+    // 2. Direct Browser-originated MultiCall3 eth_call
+    if (!data) {
+      const calldata = encodeTryAggregate(currentManifest.require_success, currentManifest.actions);
+      const rawHex = await browserRpcCall("eth_call", [
+        { to: MULTICALL3_ADDRESS, data: calldata },
+        "latest"
+      ]);
+      const blockHex = await browserRpcCall("eth_blockNumber");
+      const blockNum = parseInt(blockHex, 16);
+
+      const decodedResults = decodeTryAggregate(rawHex);
+
+      let successCount = 0;
+      let failCount = 0;
+      const resultsWithActions = decodedResults.map((r, idx) => {
+        if (r.success) successCount++;
+        else failCount++;
+        const act = currentManifest.actions[idx] || {};
+        return {
+          index: idx,
+          target: act.target || MULTICALL3_ADDRESS,
+          description: act.description || `Action #${idx + 1}`,
+          success: r.success,
+          return_data: r.return_data,
+          revert_reason: r.revert_reason,
+          decoded_value: r.decoded_value
+        };
+      });
+
+      data = {
+        network: {
+          name: "Pharos Atlantic Testnet",
+          chain_id: EXPECTED_CHAIN_ID,
+          block_number: blockNum,
+          multicall3_address: MULTICALL3_ADDRESS
+        },
+        calldata_sent: calldata,
+        raw_rpc_response: rawHex,
+        summary: {
+          total_actions: currentManifest.actions.length,
+          successful_actions: successCount,
+          failed_actions: failCount,
+          all_succeeded: failCount === 0
+        },
+        results: resultsWithActions
+      };
+    }
+
     renderResults(data);
   } catch (err) {
     resultsStatusBadge.textContent = "Execution Failed";
@@ -219,7 +396,7 @@ async function executeBatch() {
   } finally {
     btnExecute.disabled = false;
     btnExecute.textContent = "Execute Single MultiCall3 Batch";
-    fetchStatus(); // refresh block number
+    fetchStatus();
   }
 }
 
@@ -248,37 +425,50 @@ function renderResults(data) {
   data.results.forEach((r, idx) => {
     const item = document.createElement("div");
     item.className = `result-item ${r.success ? "success" : "revert"}`;
-    const desc = currentManifest.actions[idx]?.description || `Action #${idx + 1}`;
-
-    if (r.success) {
-      item.innerHTML = `
-        <div class="result-head">
-          <span class="result-title">Action #${idx + 1}: ${desc}</span>
-          <span class="result-tag tag-success">SUCCESS</span>
-        </div>
-        <div class="result-detail">
-          Decoded Return: <strong style="color: var(--text-main); font-family: var(--font-mono);">${r.decoded_value}</strong>
-        </div>
-        <div class="result-detail" style="font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);">
-          Raw Hex: ${r.raw_return_data}
-        </div>
-      `;
-    } else {
-      item.innerHTML = `
-        <div class="result-head">
-          <span class="result-title">Action #${idx + 1}: ${desc}</span>
-          <span class="result-tag tag-revert">REVERTED [${r.revert_type || "Error"}]</span>
-        </div>
-        <div class="revert-msg">
-          Revert Reason: ${r.revert_message || "Reverted without reason string"}
-        </div>
-        <div class="result-detail" style="font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); margin-top: 4px;">
-          Raw Revert Data: ${r.raw_return_data}
-        </div>
-      `;
-    }
+    item.innerHTML = `
+      <div class="result-head">
+        <span class="result-title">Action #${idx + 1}: ${r.description}</span>
+        <span class="result-tag ${r.success ? "tag-success" : "tag-revert"}">
+          ${r.success ? "SUCCESS" : "FAILED"}
+        </span>
+      </div>
+      ${r.success
+        ? `<div class="result-return-data" title="${r.return_data}">
+             <strong>Return Data:</strong> <code>${r.return_data.length > 34 ? r.return_data.slice(0, 32) + "..." : r.return_data}</code>
+             ${r.decoded_value ? `<span class="decoded-val">(Value: ${Number(r.decoded_value).toLocaleString()})</span>` : ""}
+           </div>`
+        : `<div class="revert-msg">
+             <strong>Decoded Revert Reason:</strong> ${r.revert_reason || "Unknown Revert"}
+           </div>`
+      }
+    `;
     resultsList.appendChild(item);
   });
+}
+
+// Add Custom Action Helper
+function addActionPrompt() {
+  const target = prompt("Target Contract Address (0x...):", MULTICALL3_ADDRESS);
+  if (!target || !target.startsWith("0x") || target.length !== 42) {
+    if (target) alert("Invalid target address format.");
+    return;
+  }
+  const callData = prompt("Calldata (0x...):", "0x42cbb15c");
+  if (!callData || !callData.startsWith("0x")) {
+    if (callData) alert("Invalid calldata format.");
+    return;
+  }
+  const desc = prompt("Action Description:", "Custom Query") || "Custom Query";
+
+  currentManifest.actions.push({
+    target,
+    call_data: callData,
+    description: desc,
+    action_type: "read",
+    expected_result_type: null
+  });
+
+  renderActions();
 }
 
 // Event Listeners
@@ -286,22 +476,8 @@ document.getElementById("btn-scenario-account").addEventListener("click", () => 
 document.getElementById("btn-scenario-partial").addEventListener("click", () => selectScenario("partial"));
 document.getElementById("btn-scenario-token").addEventListener("click", () => selectScenario("token"));
 btnExecute.addEventListener("click", executeBatch);
+document.getElementById("btn-add-action").addEventListener("click", addActionPrompt);
 
-document.getElementById("btn-add-action").addEventListener("click", () => {
-  const customAction = {
-    target: MULTICALL3_ADDRESS,
-    call_data: "0x42cbb15c",
-    description: `Custom MultiCall3 Action #${currentManifest.actions.length + 1}`,
-    action_type: "read",
-    expected_result_type: "uint256"
-  };
-  currentManifest.actions.push(customAction);
-  renderActions();
-});
-
-// Initialize on DOM load
-document.addEventListener("DOMContentLoaded", () => {
-  fetchStatus();
-  renderActions();
-  setInterval(fetchStatus, 15000); // Poll block height every 15s
-});
+// Initialize
+renderActions();
+fetchStatus();
