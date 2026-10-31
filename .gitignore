@@ -36,3 +36,4 @@ raw_video/
 
 # Testing relics
 artifacts/
+.vercel
