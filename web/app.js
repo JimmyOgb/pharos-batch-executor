@@ -24,7 +24,7 @@ const SCENARIOS = {
       },
       {
         target: MULTICALL3_ADDRESS,
-        call_data: "0x0e5d8001",
+        call_data: "0x0f28c97d",
         description: "MultiCall3.getCurrentBlockTimestamp()",
         action_type: "read",
         expected_result_type: "uint256"
@@ -58,7 +58,7 @@ const SCENARIOS = {
       },
       {
         target: MULTICALL3_ADDRESS,
-        call_data: "0x0e5d8001",
+        call_data: "0x0f28c97d",
         description: "MultiCall3.getCurrentBlockTimestamp() [Valid]",
         action_type: "read",
         expected_result_type: "uint256"
